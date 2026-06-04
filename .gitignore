@@ -1,1 +1,4 @@
 systemDesign/*.drawio*
+systemDesign/.~lock*
+backend/myVenv
+.env
