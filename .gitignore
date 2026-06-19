@@ -1,4 +1,9 @@
 systemDesign/*.drawio*
 systemDesign/.~lock*
+
+
 backend/myVenv
+
+
 .env
+__pycache__/
