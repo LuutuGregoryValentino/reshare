@@ -1,13 +1,12 @@
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-import os
-
+import os, json
 from app.services.session import manager #importing the class instance so that the class members are shared ny all the independent module files
 
 app = FastAPI()
 
-FRONTEND_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__),"../../frontend/static/index.html"))
+FRONTEND_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../frontend/static/index.html"))
 
 @app.get("/")
 async def get_homepage():
@@ -15,26 +14,32 @@ async def get_homepage():
 
 
 
-@app.websocket("/ws/{device_id}")
+@app.websocket("/ws/{device_ID}")
 async def websocket_endpoint(websocket: WebSocket, device_ID: str ):
-    device_id = device_ID.lower()
-    
-    await manager.accept_device(device_id, websocket) #adds the device to the global active connections dict in ram
-
     try:
+        device_id = device_ID.lower()
+        
+        await manager.accept_device(device_id, websocket) #adds the device to the global active connections dict in ram
+        # print("manager is accepting the device")
+
+    
         while True: #infinite loop that keeps the connection live 
             data = await websocket.receive_text()
             print(f"Received: {data}\t from Device {device_id}\n")
 
             if data.startswith("TARGET"): #chekc if incoming message follows format  "TARGET:Reciever:Message"
                 try:
-                    _ , target_ID, message_content = data.split(':', 2)
-                    target_id = target_ID.lower()
+                    _ , target_id, message_content = data.split(':', 2)
+                    target_id = target_id.lower()
+                    # print("hop1: string split success")
 
-                    success = await manager.send_target_messages(
+                    success = await manager.send_target_message(
                         message = f"From {device_id}: {message_content}",
                         target_device_id = target_id
                     )
+
+                    # print("hop 2, message has been sent")
+                    # print(f" hop 2 Manager routing result for '{target_id}': {success}")
 
                     if not success:
                         await websocket.send_text(f"Hub system: {target_id} is currently offline")
