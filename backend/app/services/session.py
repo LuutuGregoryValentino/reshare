@@ -4,7 +4,7 @@ from typing import Dict
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[str: WebSocket] = {}
+        self.active_connections: Dict[str, WebSocket] = {}
 
     async def accept_device(self, device_id: str, websocket: WebSocket):
         await websocket.accept()
@@ -17,16 +17,16 @@ class ConnectionManager:
             print(f"Device {device_id} has been gracefully disconnected\nRemaining Devices: \n{list(self.active_connections.keys())}")
 
         
-    async def send_target_message(self, message: str, target_device_id: str) -> bool:
+    async def send_target_message(self, message: dict, target_device_id: str) -> bool:
         # print(f"🔍 [HOP 3] Dictionary Check. Looking for: '{target_device_id}'. Current memory keys: {list(self.active_connections.keys())}")
         if target_device_id in self.active_connections:
             target_websocket = self.active_connections[target_device_id]
 
-            await target_websocket.send_text(message)
+            await target_websocket.send_json(message)
             # print(f"✅ [HOP 4] Bytes successfully pushed to network socket for '{target_id}'")
             return True
         
-        print (f"Failed to Route message. target device {target_device_id} is")
+        print (f"Failed to Route message. target device {target_device_id} is offline")
         # print(f"HOP4, lookup failed. '{target_device_id}' is not in memory")
         return False
 
