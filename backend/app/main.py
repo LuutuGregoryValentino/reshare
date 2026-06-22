@@ -24,32 +24,40 @@ async def websocket_endpoint(websocket: WebSocket, device_ID: str ):
 
     
         while True: #infinite loop that keeps the connection live 
-            data = await websocket.receive_text()
-            print(f"Received: {data}\t from Device {device_id}\n")
+            data = await websocket.receive_json()
+            print(f"Received: {data["type"]}\t from Device {device_id}\n")
 
-            if data.startswith("TARGET"): #chekc if incoming message follows format  "TARGET:Reciever:Message"
-                try:
-                    _ , target_id, message_content = data.split(':', 2)
-                    target_id = target_id.lower()
-                    # print("hop1: string split success")
+            packet_type = data.get("type")
+            target_raw = data.get("target_id")
 
-                    success = await manager.send_target_message(
-                        message = f"From {device_id}: {message_content}",
+            if not target_raw:
+                print("Recieving packet missing 'target_id'. Ignoring!!")
+                continue
+
+            target_id = target_raw.lower()
+
+            if packet_type == "metadata":
+                filename = data.get("filename")
+                size = data.get("file_size")
+
+                print(f"""
+Media MetaData
+From      :  {device_id}
+To        :  {target_id}
+File Name :  {filename}
+Size      :  {size} MB                 
+""")
+                await manager.send_target_message(
+                        message = data,
                         target_device_id = target_id
                     )
-
-                    # print("hop 2, message has been sent")
-                    # print(f" hop 2 Manager routing result for '{target_id}': {success}")
-
-                    if not success:
-                        await websocket.send_text(f"Hub system: {target_id} is currently offline")
-
-                except ValueError: # for when the message dosnt follow the correct format eg. "TARGET:gregs_phone"
-                    await websocket.send_text(f'HUB ERROR: Format must be "TARGET:receiving:message')
-
-            else:
-                await websocket.send_text(f"Hub heard {device_id} say: {data}")
-
+                
+            elif packet_type == "chat":
+                print(f"Chat from {device_id} to {target_id}")
+                await manager.send_target_message(
+                    message=data,
+                    target_device_id=target_id,
+                )
 
     except WebSocketDisconnect: #wehn user closes tab or losses netwrok
         manager.remove_device(device_id)
