@@ -2,45 +2,299 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ReShare</title>
+    <title>ReShare - Video Stream Dev</title>
+    <!-- Add some basic styling so we can see what's happening -->
+    <style>
+        body { font-family: sans-serif; background-color: #1a1a1a; color: #eee; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .container { text-align: center; background: #2a2a2a; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); width: 80%; max-width: 600px;}
+        #register-section, #share-section, #watch-section { margin-bottom: 25px; border-bottom: 1px solid #444; padding-bottom: 20px; }
+        input[type="text"] { padding: 12px; border-radius: 8px; border: 1px solid #444; background: #333; color: white; width: 60%; font-size: 16px;}
+        button { padding: 12px 24px; border-radius: 8px; border: none; background: #ff4757; color: white; font-weight: bold; cursor: pointer; font-size: 16px; transition: background 0.2s;}
+        button:hover { background: #ff6b81; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        #log { background: #111; color: #0f0; font-family: monospace; padding: 15px; border-radius: 8px; height: 150px; overflow-y: scroll; text-align: left; font-size: 12px; margin-top: 10px;}
+        video { width: 100%; max-width: 500px; border-radius: 8px; border: 2px solid #555; background: black;}
+        #status-bar { height: 20px; background: #333; border-radius: 4px; margin-top: 10px; position: relative; overflow: hidden; }
+        #status-progress { height: 100%; background: #2ecc71; width: 0%; transition: width 0.1s linear; }
+    </style>
 </head>
-<body style="background: #222; color: #fff; font-family: sans-serif; text-align: center; padding-top: 50px;">
-    <h1>ReShare</h1>
-    <div id="status" style="font-size: 24px; color: yellow;">Connecting...</div>
 
-    <script>
-        const name = prompt("Enter your devices alias to be used whiel sharing data", "phone_a")
-        const currentHost = window.location.host;
-        const socket = new WebSocket(`ws://${currentHost}/ws/${name}`);
+<body>
 
-        socket.onopen = () =>{
-            document.getElementById("status").innerText = "Connected to Hub";
-            document.getElementById("status").style.color = "lightgreen"
+<div class="container">
+    <h2>ReShare Dev Hub</h2>
+
+    <!-- PHASE 1: Registration (You already built this, just making it look nicer) -->
+    <div id="register-section">
+        <p>Step 1: Enter your unique Device ID</p>
+        <input type="text" id="device_id" placeholder="e.g., phone_a" value="phone_a">
+        <button id="connect-btn" onclick="connectWebSocket()">Connect Hub</button>
+    </div>
+
+    <!-- PHASE 2: Share Section (The Sender - phone_a) -->
+    <div id="share-section" style="display: none;">
+        <h3>📤 Share a Movie</h3>
+        <p>Address of target device:</p>
+        <input type="text" id="target_id" placeholder="e.g., phone_b" value="phone_b" style="margin-bottom: 10px;"><br/>
+        
+        <!-- THE FILE PICKER -->
+        <input type="file" id="file-picker" accept="video/mp4" style="color: transparent; margin-bottom: 10px;">
+        <br/>
+        <button id="share-btn" onclick="startRealFileStream()" disabled>Start Real Stream</button>
+        
+        <!-- Transfer Progress Bar -->
+        <div id="status-bar"><div id="status-progress"></div></div>
+        <p id="transfer-status" style="font-size: 12px; color: #aaa;">Status: Idle</p>
+    </div>
+
+    <!-- PHASE 3: Watch Section (The Receiver - phone_b) -->
+    <div id="watch-section" style="display: none;">
+        <h3>🎬 Watching Div</h3>
+        <video id="video-player" controls>
+            Your browser does not support the video tag.
+        </video>
+        <p style="font-size: 12px; color: #aaa;">Waiting for movie stream...</p>
+    </div>
+
+    <!-- Dev Logs Area -->
+    <div id="log">ReShare Dev Logs Ready...</div>
+</div>
+
+   <script>
+    // Global references
+    let socket;
+    let localDeviceId;
+    let fileToBeSent = null;
+
+    // References to UI elements
+    const logDiv = document.getElementById('log');
+    const shareSection = document.getElementById('share-section');
+    const watchSection = document.getElementById('watch-section');
+    const registerSection = document.getElementById('register-section');
+    const filePicker = document.getElementById('file-picker');
+    const shareBtn = document.getElementById('share-btn');
+    const progressBar = document.getElementById('status-progress');
+    const statusText = document.getElementById('transfer-status');
+    const videoPlayer = document.getElementById('video-player');
+
+    // Utility: Add logs to the on-screen terminal
+    function log(message) {
+        logDiv.innerHTML += `> ${message}<br>`;
+        logDiv.scrollTop = logDiv.scrollHeight;
+        console.log(message);
+    }
+
+    // Connect to the backend Hub (Port 8001)
+    function connectWebSocket() {
+        localDeviceId = document.getElementById('device_id').value;
+        if (!localDeviceId) { alert("Please enter a device name."); return; }
+
+        log(`Connecting to Hub as '${localDeviceId}' on port 8001...`);
+        // Note: Make sure the port here matches your Uvicorn port!
+        socket = new WebSocket(`ws://127.0.0.1:8001/ws/${localDeviceId}`);
+
+        socket.onopen = function(e) {
+            log(`✅ Connection established. Registering...`);
+            registerSection.style.display = 'none';
+            // Everyone can share and everyone can receive
+            shareSection.style.display = 'block';
+            watchSection.style.display = 'block';
         };
 
+        // **********************************************
+        // * PART 3: The Receiver Logic (phone_b)
+        // * ********************************************
+        
+        let receivedMetadata = null;
+        let receivedChunksBuffer = []; // Temporary holding tank in RAM for incoming slices
+        
+        socket.onmessage = function(event) {
+            try {
+                const packet = JSON.parse(event.data);
+                
+                if (packet.type === 'metadata') {
+                    log(`📁 [META IN] '${packet.filename}' coming from '${packet.from}'. Size: ${packet.file_size} bytes.`);
+                    // Initialize the reception process
+                    receivedMetadata = packet;
+                    receivedChunksBuffer = []; // Clear any old data
+                    videoPlayer.src = ""; // Clear existing video
+                    log(`Waiting for ${packet.total_chunks} binary chunks...`);
+                } 
+                else if (packet.type === 'file_chunk') {
+                    const currentIndex = packet.chunk_index;
+                    const totalChunks = packet.total_chunks;
+                    
+                    if (!receivedMetadata) { log("⚠️ Error: Received chunk before metadata."); return; }
 
-        socket.onmessage = (event) => {
-        try{
-            const packet  = JSON.parse(event.data);
+                    log(`📦 [CHUNK IN] ${currentIndex + 1}/${totalChunks}`);
+                    
+                    // The payload is Base64 encoded string. We convert it back to raw bytes (Uint8Array).
+                    const rawBinaryString = atob(packet.payload);
+                    const rawBytes = new Uint8Array(rawBinaryString.length);
+                    for (let i = 0; i < rawBinaryString.length; i++) {
+                        rawBytes[i] = rawBinaryString.charCodeAt(i);
+                    }
+                    
+                    // Push raw bytes into the temporary buffer at the exact index specified.
+                    // This ensures the movie reassembles correctly even if chunks arrive out of order!
+                    receivedChunksBuffer[currentIndex] = rawBytes;
 
-        if (packet.type === 'metadata') {
-            console.log(`📁 [METADATA RECEIVED] Incoming file: ${packet.filename} (${packet.file_size} MB)`);
-            alert(`Device incoming file! Name: ${packet.filename}`);
-        } 
-        else if (packet.type === 'file_chunk') {
-            console.log(`📦 [CHUNK RECEIVED] ${packet.filename} -> Chunk ${packet.chunk_index + 1}/${packet.total_chunks}`);
-        } 
-        else if (packet.type === 'chat') {
-            console.log(`💬 [CHAT RECEIVED] ${packet.message}`);
-        }
-
-        } catch (e){
-            console.log("Hub text: ", event.data)
-        }
-            console.log("Message from server:", event.data);
-            alert("Server says: " + event.data);
+                    // Check if reception is complete
+                    if (currentIndex === totalChunks - 1) {
+                        log(`🏁 All chunks received. Reassembling movie blob...`);
+                        finalizeVideoAssembly();
+                    }
+                }
+            } catch (err) {
+                log(`Hub text message: ${event.data}`);
+            }
         };
-        </script>
+
+        function finalizeVideoAssembly() {
+            // Step 1: Stitch all collected Uint8Array byte chunks into a unified Blob
+            // Make sure the mime-type matches exactly (defaulting to .mp4 for dev)
+            const videoBlob = new Blob(receivedChunksBuffer, { type: 'video/mp4' });
+            
+            // Step 2: Create a local temporary URL pointing to this data in the browser's memory
+            const videoUrl = URL.createObjectURL(videoBlob);
+            log(`🎬 Movie Assembled successfully! Local URL: ${videoUrl}`);
+            
+            // Step 3: Set the <video> source and notify the user
+            videoPlayer.src = videoUrl;
+            log(`Video player loaded. Press play to watch.`);
+        }
+
+        socket.onclose = function(event) {
+            log(`❌ Hub connection closed.`);
+            registerSection.style.display = 'block';
+            shareSection.style.display = 'none';
+            watchSection.style.display = 'none';
+        };
+
+        socket.onerror = function(error) {
+            log(`💥 WebSocket Error: ${error.message}`);
+        };
+    }
+
+    // **********************************************
+    // * PART 2: The Sender Logic (phone_a)
+    // * ********************************************
+
+    // Event Listener: When a user picks a file, update the share button
+    filePicker.addEventListener('change', function(event) {
+        if (event.target.files.length > 0) {
+            fileToBeSent = event.target.files[0];
+            const fileSizeKB = Math.round(fileToBeSent.size / 1024);
+            log(`✅ Real file selected: '${fileToBeSent.name}' (${fileSizeKB} KB)`);
+            shareBtn.disabled = false;
+        } else {
+            fileToBeSent = null;
+            shareBtn.disabled = true;
+        }
+    });
+
+    // The Main Real File Streaming Pipeline
+    function startRealFileStream() {
+// ✅ CORRECT (JavaScript syntax)
+        const targetId = document.getElementById('target_id').value.toLowerCase();
+        
+        if (!fileToBeSent || !targetId) { alert("Please select a target device and a file."); return; }
+
+        log(`🚀 Starting REAL file stream of '${fileToBeSent.name}' to '${targetId}'...`);
+        shareBtn.disabled = true; // Prevent double clicks
+
+        // *************************************************************
+        // Step 1: Calculate Chunking (Data Preparation Layer)
+        // *************************************************************
+        const CHUNK_SIZE = 1024 * 64; // 64 KB slices (balanced for WebSocket speed vs. packet size)
+        const fileSize = fileToBeSent.size;
+        const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+        
+        log(`📂 File Preparation complete: ${fileSize} bytes. Slicing into ${totalChunks} chunks.`);
+
+        // *************************************************************
+        // Step 2: Send Metadata Manifest Packet
+        // *************************************************************
+        const metadataPacket = {
+            type: "metadata",
+            from: localDeviceId, // Identify who sent it
+            target_id: targetId,
+            filename: fileToBeSent.name,
+            file_size: fileSize,
+            total_chunks: totalChunks
+        };
+        socket.send(JSON.stringify(metadataPacket));
+        log("📤 Metadata manifest sent.");
+
+        // *************************************************************
+        // Step 3: Stream Real Bytes (Chunking & Encoding Phase)
+        // *************************************************************
+        let currentChunkIndex = 0;
+        
+        // We use a small delay between chunks in development just so we can 
+        // read the logs. In production, we'd use async await or a dynamic queue.
+        const transferInterval = setInterval(() => {
+            if (currentChunkIndex >= totalChunks) {
+                clearInterval(transferInterval);
+                log(`✅ File transfer successfully completed!`);
+                shareBtn.disabled = false;
+                progressBar.style.width = '100%';
+                statusText.innerText = "Status: Completed.";
+                return;
+            }
+
+            // Calculate slice bounds
+            const startByte = currentChunkIndex * CHUNK_SIZE;
+            const endByte = Math.min(startByte + CHUNK_SIZE, fileSize);
+            
+            // Slice the actual binary data off the file object!
+            const chunkBlob = fileToBeSent.slice(startByte, endByte);
+            
+            // ***************************************************************
+            // Binary Ingestion Layer: We need to read raw bytes from the slice.
+            // ***************************************************************
+            const reader = new FileReader();
+            
+            // This asynchronous callback executes when FileReader finishes slicing the bytes
+            reader.onloadend = function(e) {
+                if (e.target.readyState === FileReader.DONE) {
+                    // Step A: Convert sliced result into a manageable ArrayBuffer (raw bytes)
+                    const arrayBuffer = e.target.result;
+                    
+                    // Step B: Encode these binary bytes into a Base64 string for safe JSON embedding.
+                    const binaryString = String.fromCharCode.apply(null, new Uint8Array(arrayBuffer));
+                    const base64Data = btoa(binaryString);
+
+                    // Step C: Build the standard file_chunk packet
+                    const chunkPacket = {
+                        type: "file_chunk",
+                        target_id: targetId,
+                        filename: fileToBeSent.name,
+                        chunk_index: currentChunkIndex,
+                        total_chunks: totalChunks,
+                        payload: base64Data // THE REAL MOVIE BYTES ARE HERE!
+                    };
+
+                    // Step D: FIRE! Push the real movie chunk over the network.
+                    socket.send(JSON.stringify(chunkPacket));
+                    
+                    // Update the progress UI
+                    const percentComplete = Math.round(((currentChunkIndex + 1) / totalChunks) * 100);
+                    progressBar.style.width = percentComplete + '%';
+                    statusText.innerText = `Status: Sending Chunk ${currentChunkIndex + 1}/${totalChunks}...`;
+                    
+                    currentChunkIndex++; // Prepare next chunk
+                }
+            };
+            
+            // Start the asynchronous read process for the slice
+            reader.readAsArrayBuffer(chunkBlob);
+            
+        }, 100); // 100ms artificial delay for log visibility during dev
+
+    }
+</script>
+
+
 </body>
 </html>
