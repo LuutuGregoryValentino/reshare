@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 import os, json
@@ -25,7 +24,7 @@ async def websocket_endpoint(websocket: WebSocket, device_ID: str ):
     
         while True: #infinite loop that keeps the connection live 
             data = await websocket.receive_json()
-            print(f"Received: {data["type"]}\t from Device {device_id}\n")
+            print(f"Received: {data.get('type')}\t from Device {device_id}\n")
 
             packet_type = data.get("type")
             target_raw = data.get("target_id")
@@ -40,7 +39,7 @@ async def websocket_endpoint(websocket: WebSocket, device_ID: str ):
                 filename = data.get("filename")
                 size = data.get("file_size")
 
-                print(f"""
+                print(f"""\
 Media MetaData
 From      :  {device_id}
 To        :  {target_id}
@@ -48,9 +47,25 @@ File Name :  {filename}
 Size      :  {size} MB                 
 """)
                 await manager.send_target_message(
-                        message = data,
-                        target_device_id = target_id
-                    )
+                    message = data,
+                    target_device_id = target_id
+                )
+
+            elif packet_type == "file_chunk":
+
+                current_chunk = data.get("chunk_index")
+                total_chunks = data.get("total_chunks")
+                filename = data.get("filename")
+
+                print(f"""\
+STREAMING {filename} Chunk [{current_chunk + 1}/{total_chunks}] ──> {target_id}
+
+""")
+
+                await manager.send_target_message(
+                    message = data,
+                    target_device_id = target_id
+                )
                 
             elif packet_type == "chat":
                 print(f"Chat from {device_id} to {target_id}")
@@ -58,12 +73,12 @@ Size      :  {size} MB
                     message=data,
                     target_device_id=target_id,
                 )
+            
 
     except WebSocketDisconnect: #wehn user closes tab or losses netwrok
         manager.remove_device(device_id)
-        print("Device {device_id} has disconnected gracefully")
+        print(f"Device {device_id} has disconnected gracefully")
 
     except Exception as e: # catches unexpected errors without crashing server
         manager.remove_device(device_id)
         print(f"Unexcpected network glitch on Device {device_id}: {e}")
-    

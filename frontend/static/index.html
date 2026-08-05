@@ -19,7 +19,25 @@
             document.getElementById("status").style.color = "lightgreen"
         };
 
+
         socket.onmessage = (event) => {
+        try{
+            const packet  = JSON.parse(event.data);
+
+        if (packet.type === 'metadata') {
+            console.log(`📁 [METADATA RECEIVED] Incoming file: ${packet.filename} (${packet.file_size} MB)`);
+            alert(`Device incoming file! Name: ${packet.filename}`);
+        } 
+        else if (packet.type === 'file_chunk') {
+            console.log(`📦 [CHUNK RECEIVED] ${packet.filename} -> Chunk ${packet.chunk_index + 1}/${packet.total_chunks}`);
+        } 
+        else if (packet.type === 'chat') {
+            console.log(`💬 [CHAT RECEIVED] ${packet.message}`);
+        }
+
+        } catch (e){
+            console.log("Hub text: ", event.data)
+        }
             console.log("Message from server:", event.data);
             alert("Server says: " + event.data);
         };

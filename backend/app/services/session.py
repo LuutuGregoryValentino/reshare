@@ -1,10 +1,9 @@
 
 from fastapi import WebSocket
-from typing import Dict
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
+        self.active_connections: dict[str, WebSocket] = {}
 
     async def accept_device(self, device_id: str, websocket: WebSocket):
         await websocket.accept()
