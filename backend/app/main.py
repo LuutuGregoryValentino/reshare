@@ -1,7 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-import os, json
-from app.services.session import manager #importing the class instance so that the class members are shared ny all the independent module files
+import os, json, asyncio
+from app.services.session import manager
 
 app = FastAPI()
 
@@ -11,74 +11,45 @@ FRONTEND_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../f
 async def get_homepage():
     return FileResponse(FRONTEND_PATH)
 
-
-
 @app.websocket("/ws/{device_ID}")
-async def websocket_endpoint(websocket: WebSocket, device_ID: str ):
+async def websocket_endpoint(websocket: WebSocket, device_ID: str):
+    device_id = device_ID.lower()
+    await manager.accept_device(device_id, websocket)
+
     try:
-        device_id = device_ID.lower()
-        
-        await manager.accept_device(device_id, websocket) #adds the device to the global active connections dict in ram
-        # print("manager is accepting the device")
+        while True:
+            message = await websocket.receive()
 
-    
-        while True: #infinite loop that keeps the connection live 
-            data = await websocket.receive_json()
-            print(f"Received: {data.get('type')}\t from Device {device_id}\n")
+            # 1. CONTROL PLANE (JSON Signals)
+            if "text" in message:
+                data = json.loads(message["text"])
+                packet_type = data.get("type")
+                target_raw = data.get("target_id")
 
-            packet_type = data.get("type")
-            target_raw = data.get("target_id")
+                if not target_raw:
+                    continue
 
-            if not target_raw:
-                print("Recieving packet missing 'target_id'. Ignoring!!")
-                continue
+                target_id = target_raw.lower()
 
-            target_id = target_raw.lower()
+                if packet_type in ["metadata", "request_chunk", "chat"]:
+                    print(f"📁 [{packet_type.upper()}] From {device_id} ──> {target_id}")
+                    await manager.send_target_message(message=data, target_device_id=target_id)
 
-            if packet_type == "metadata":
-                filename = data.get("filename")
-                size = data.get("file_size")
-
-                print(f"""\
-Media MetaData
-From      :  {device_id}
-To        :  {target_id}
-File Name :  {filename}
-Size      :  {size} MB                 
-""")
-                await manager.send_target_message(
-                    message = data,
-                    target_device_id = target_id
-                )
-
-            elif packet_type == "file_chunk":
-
-                current_chunk = data.get("chunk_index")
-                total_chunks = data.get("total_chunks")
-                filename = data.get("filename")
-
-                print(f"""\
-STREAMING {filename} Chunk [{current_chunk + 1}/{total_chunks}] ──> {target_id}
-
-""")
-
-                await manager.send_target_message(
-                    message = data,
-                    target_device_id = target_id
-                )
+            # 2. DATA PLANE (2MB Raw Video Slices)
+            elif "bytes" in message:
+                raw_bytes = message["bytes"]
+                # Relay bytes to active target connections while yielding to event loop
+                for target_id, conn in list(manager.active_connections.items()):
+                    if target_id != device_id:
+                        await conn.send_bytes(raw_bytes)
                 
-            elif packet_type == "chat":
-                print(f"Chat from {device_id} to {target_id}")
-                await manager.send_target_message(
-                    message=data,
-                    target_device_id=target_id,
-                )
-            
+                # Crucial: Yield control to FastAPI event loop to allow keepalive pings
+                await asyncio.sleep(0.001)
 
-    except WebSocketDisconnect: #wehn user closes tab or losses netwrok
+    except WebSocketDisconnect:
         manager.remove_device(device_id)
-        print(f"Device {device_id} has disconnected gracefully")
+        print(f"Device {device_id} disconnected gracefully")
 
-    except Exception as e: # catches unexpected errors without crashing server
+    except Exception as e:
         manager.remove_device(device_id)
-        print(f"Unexcpected network glitch on Device {device_id}: {e}")
+        print(f"Unexpected network glitch on Device {device_id}: {e}")
