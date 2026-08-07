@@ -142,67 +142,111 @@
     // ==========================================
     // 2. FILE SYSTEM ACCESS API (HOST VAULT)
     // ==========================================
+
     async function selectVaultDirectory() {
-        if (!('showDirectoryPicker' in window)) {
-            alert("Your browser does not support local Directory Access. Please use Chrome/Edge on Desktop/Android.");
-            return;
-        }
+        // Modern File System Access API (Chrome, Edge, Opera)
+        if ('showDirectoryPicker' in window) {
+            try {
+                vaultDirectoryHandle = await window.showDirectoryPicker();
+                vaultFileMap.clear();
+                
+                const manifestList = [];
 
-        try {
-            vaultDirectoryHandle = await window.showDirectoryPicker();
-            vaultFileMap.clear();
-            
-            const manifestList = [];
-
-            // Read all direct video files inside the directory
-            for await (const entry of vaultDirectoryHandle.values()) {
-                if (entry.kind === 'file') {
-                    const file = await entry.getFile();
-                    if (file.type.startsWith('video/') || file.name.endsWith('.mp4') || file.name.endsWith('.mkv')) {
-                        vaultFileMap.set(file.name, entry);
-                        manifestList.push({
-                            name: file.name,
-                            size: (file.size / (1024 * 1024)).toFixed(2) + " MB",
-                            type: file.type
-                        });
+                for await (const entry of vaultDirectoryHandle.values()) {
+                    if (entry.kind === 'file') {
+                        const file = await entry.getFile();
+                        if (file.type.startsWith('video/') || file.name.endsWith('.mp4') || file.name.endsWith('.mkv')) {
+                            vaultFileMap.set(file.name, file); // Store file reference directly
+                            manifestList.push({
+                                name: file.name,
+                                size: (file.size / (1024 * 1024)).toFixed(2) + " MB",
+                                type: file.type
+                            });
+                        }
                     }
                 }
-            }
 
-            document.getElementById('vault-status').innerText = `Vault Open: ${vaultFileMap.size} videos indexed.`;
-            log(`📂 [HOST VAULT] Indexed ${vaultFileMap.size} files in selected folder.`);
-
-            // Broadcast the folder manifest to the target device
-            const targetId = document.getElementById('target_id').value.toLowerCase().trim();
-            if (targetId) {
-                socket.send(JSON.stringify({
-                    type: "vault_manifest",
-                    from: localDeviceId,
-                    target_id: targetId,
-                    files: manifestList
-                }));
-                log(`📤 Manifest broadcast sent to '${targetId}'.`);
+                broadcastVaultManifest(manifestList);
+                return;
+            } catch (err) {
+                if (err.name !== 'AbortError') {
+                    log(`⚠️ Native picker failed, switching to standard folder picker: ${err.message}`);
+                } else {
+                    return; // User intentionally canceled selection
+                }
             }
-        } catch (err) {
-            log(`⚠️ [VAULT] Directory selection cancelled or failed: ${err.message}`);
+        }
+
+        // Standard HTML5 Directory Fallback (Firefox, Safari, Mobile Chrome)
+        log("📁 Using standard WebKit Directory Picker for Firefox/Safari compatibility...");
+        
+        const folderInput = document.createElement('input');
+        folderInput.type = 'file';
+        folderInput.webkitdirectory = true; // Enables directory selection in Firefox
+        folderInput.multiple = true;
+
+        folderInput.onchange = async (e) => {
+            const files = Array.from(e.target.files);
+            vaultFileMap.clear();
+            const manifestList = [];
+
+            files.forEach(file => {
+                if (file.type.startsWith('video/') || file.name.endsWith('.mp4') || file.name.endsWith('.mkv')) {
+                    // Extract relative path or simple name
+                    const fileName = file.name;
+                    vaultFileMap.set(fileName, file); // Direct File Blob object
+                    manifestList.push({
+                        name: fileName,
+                        size: (file.size / (1024 * 1024)).toFixed(2) + " MB",
+                        type: file.type
+                    });
+                }
+            });
+
+            broadcastVaultManifest(manifestList);
+        };
+
+        folderInput.click();
+    }
+
+    function broadcastVaultManifest(manifestList) {
+        document.getElementById('vault-status').innerText = `Vault Open: ${manifestList.length} videos indexed.`;
+        log(`📂 [HOST VAULT] Indexed ${manifestList.length} files in selected folder.`);
+
+        const targetId = document.getElementById('target_id').value.toLowerCase().trim();
+        if (targetId) {
+            socket.send(JSON.stringify({
+                type: "vault_manifest",
+                from: localDeviceId,
+                target_id: targetId,
+                files: manifestList
+            }));
+            log(`📤 Manifest broadcast sent to '${targetId}'.`);
         }
     }
 
+
     // Stream a requested file handle over WebSocket (Host side)
+
+
     async function streamFileFromVault(filename, targetId) {
-        const fileHandle = vaultFileMap.get(filename);
-        if (!fileHandle) {
+        let file = vaultFileMap.get(filename);
+        
+        // Handle both FileSystemFileHandle and direct File objects
+        if (file && typeof file.getFile === 'function') {
+            file = await file.getFile();
+        }
+
+        if (!file) {
             log(`❌ [HOST] Requested file '${filename}' not found in local vault map.`);
             return;
         }
 
-        const file = await fileHandle.getFile();
         log(`🚀 [HOST STREAMING] Slicing and sending '${file.name}' (${(file.size / 1024 / 1024).toFixed(2)} MB)...`);
 
         const CHUNK_SIZE = 2 * 1024 * 1024;
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-        // Send metadata
         socket.send(JSON.stringify({
             type: "metadata",
             from: localDeviceId,
@@ -239,12 +283,11 @@
             }
 
             currentChunkIndex++;
-            setTimeout(sendNextChunk, 30); // Low-latency tick pacing
+            setTimeout(sendNextChunk, 30);
         }
 
         sendNextChunk();
     }
-
     // ==========================================
     // 3. WEBSOCKET SIGNALING & GUEST RECEIVER
     // ==========================================
