@@ -2,53 +2,65 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ReShare - Zero-Install Media Bridge</title>
+    <title>ReShare - Remote Vault & Streaming Engine</title>
     <style>
-        body { font-family: sans-serif; background-color: #1a1a1a; color: #eee; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .container { text-align: center; background: #2a2a2a; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); width: 80%; max-width: 600px;}
-        #register-section, #share-section, #watch-section { margin-bottom: 25px; border-bottom: 1px solid #444; padding-bottom: 20px; }
+        body { font-family: sans-serif; background-color: #1a1a1a; color: #eee; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px;}
+        .container { text-align: center; background: #2a2a2a; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); width: 90%; max-width: 650px;}
+        #register-section, #share-section, #watch-section, #vault-section { margin-bottom: 20px; border-bottom: 1px solid #444; padding-bottom: 20px; }
         input[type="text"] { padding: 12px; border-radius: 8px; border: 1px solid #444; background: #333; color: white; width: 60%; font-size: 16px;}
-        button { padding: 12px 24px; border-radius: 8px; border: none; background: #ff4757; color: white; font-weight: bold; cursor: pointer; font-size: 16px; transition: background 0.2s; margin: 5px;}
+        button { padding: 12px 20px; border-radius: 8px; border: none; background: #ff4757; color: white; font-weight: bold; cursor: pointer; font-size: 14px; transition: background 0.2s; margin: 4px;}
         button:hover { background: #ff6b81; }
         button:disabled { background: #555; cursor: not-allowed; }
-        #log { background: #111; color: #0f0; font-family: monospace; padding: 15px; border-radius: 8px; height: 150px; overflow-y: scroll; text-align: left; font-size: 12px; margin-top: 10px;}
+        .btn-success { background: #2ecc71; }
+        .btn-success:hover { background: #27ae60; }
+        #log { background: #111; color: #0f0; font-family: monospace; padding: 12px; border-radius: 8px; height: 140px; overflow-y: scroll; text-align: left; font-size: 12px; margin-top: 10px;}
         video { width: 100%; max-width: 500px; border-radius: 8px; border: 2px solid #555; background: black;}
-        #status-bar { height: 20px; background: #333; border-radius: 4px; margin-top: 10px; position: relative; overflow: hidden; }
+        #status-bar { height: 18px; background: #333; border-radius: 4px; margin-top: 10px; position: relative; overflow: hidden; }
         #status-progress { height: 100%; background: #2ecc71; width: 0%; transition: width 0.1s linear; }
+        .file-list { text-align: left; background: #111; border-radius: 8px; padding: 10px; max-height: 150px; overflow-y: auto; margin-top: 10px;}
+        .file-item { display: flex; justify-content: space-between; align-items: center; padding: 6px; border-bottom: 1px solid #333; font-size: 13px;}
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>ReShare Dev Hub</h2>
+    <h2>ReShare Vault Engine</h2>
 
+    <!-- Step 1: Device Registration -->
     <div id="register-section">
         <p>Step 1: Enter your unique Device ID</p>
         <input type="text" id="device_id" placeholder="e.g., phone_a" value="phone_a">
         <button id="connect-btn" onclick="connectWebSocket()">Connect Hub</button>
     </div>
 
+    <!-- Step 2: Sharing / Folder Access (Host Role) -->
     <div id="share-section" style="display: none;">
-        <h3>📤 Share a Movie</h3>
-        <p>Address of target device:</p>
+        <h3>📁 Host Vault Access</h3>
+        <p>Target Device to Share With:</p>
         <input type="text" id="target_id" placeholder="e.g., phone_b" value="phone_b" style="margin-bottom: 10px;"><br/>
         
-        <input type="file" id="file-picker" accept="video/mp4" style="color: transparent; margin-bottom: 10px;">
-        <br/>
-        <button id="share-btn" onclick="startRealFileStream()" disabled>Start Real Stream</button>
+        <button class="btn-success" onclick="selectVaultDirectory()">📂 Grant Directory Permission</button>
+        <button onclick="toggleKeepAlivePiP()">⚡ Background Keep-Alive (PiP)</button>
+        
+        <p id="vault-status" style="font-size: 12px; color: #aaa; margin-top: 5px;">Vault Status: Closed</p>
         
         <div id="status-bar"><div id="status-progress"></div></div>
         <p id="transfer-status" style="font-size: 12px; color: #aaa;">Status: Idle</p>
     </div>
 
+    <!-- Step 3: Remote Vault Explorer (Guest Role) -->
+    <div id="vault-section" style="display: none;">
+        <h3>🌐 Remote Vault Explorer</h3>
+        <p style="font-size: 12px; color: #aaa;">Available files on connected host:</p>
+        <div id="file-tree" class="file-list">Waiting for host folder manifest...</div>
+    </div>
+
+    <!-- Step 4: Video Player -->
     <div id="watch-section" style="display: none;">
-        <h3>🎬 Watching Div</h3>
-        <video id="video-player" controls preload="metadata">
-            Your browser does not support the video tag.
-        </video>
+        <h3>🎬 Active Stream</h3>
+        <video id="video-player" controls preload="metadata"></video>
         <br/>
-        <button id="pip-btn" onclick="togglePictureInPicture()" style="margin-top: 10px;">📺 Pop Out Video (PiP)</button>
-        <p style="font-size: 12px; color: #aaa;">Waiting for movie stream...</p>
+        <button id="pip-btn" onclick="togglePictureInPicture()">📺 Toggle Player PiP</button>
     </div>
 
     <div id="log">ReShare Dev Logs Ready...</div>
@@ -57,23 +69,29 @@
 <script>
     let socket;
     let localDeviceId;
-    let fileToBeSent = null;
+    
+    // File Access Handles (Host Side)
+    let vaultDirectoryHandle = null;
+    let vaultFileMap = new Map(); // Maps filename -> FileSystemFileHandle
 
+    // Buffer management (Receiver Side)
     let rawChunksBuffer = [];
     let expectedTotalChunks = 0;
     let expectedFileSize = 0;
-    let activeFileName = "Video Stream";
+    let activeFileName = "Stream";
+
+    // Invisible Keep-Alive PiP
+    let keepAliveVideo = null;
 
     const logDiv = document.getElementById('log');
+    const registerSection = document.getElementById('register-section');
     const shareSection = document.getElementById('share-section');
     const watchSection = document.getElementById('watch-section');
-    const registerSection = document.getElementById('register-section');
-    const filePicker = document.getElementById('file-picker');
-    const shareBtn = document.getElementById('share-btn');
+    const vaultSection = document.getElementById('vault-section');
     const progressBar = document.getElementById('status-progress');
     const statusText = document.getElementById('transfer-status');
     const videoPlayer = document.getElementById('video-player');
-    const pipBtn = document.getElementById('pip-btn');
+    const fileTreeDiv = document.getElementById('file-tree');
 
     function log(message) {
         logDiv.innerHTML += `> ${message}<br>`;
@@ -82,151 +100,178 @@
     }
 
     // ==========================================
-    // 1. MEDIA SESSION & BACKGROUND KEEP-ALIVE
+    // 1. DUMMY PIP BACKGROUND KEEP-ALIVE
     // ==========================================
-    function setupMediaSession(filename) {
-        if ('mediaSession' in navigator) {
-            navigator.mediaSession.metadata = new MediaMetadata({
-                title: filename || "ReShare Movie Stream",
-                artist: "ReShare Zero-Install NAS",
-                album: "Live Streaming Bridge"
-            });
-
-            // Bind System Lock-Screen Controls directly to the video tag
-            navigator.mediaSession.setActionHandler('play', () => {
-                videoPlayer.play();
-                log("▶️ [MEDIA SESSION] Play command received from OS.");
-            });
-            navigator.mediaSession.setActionHandler('pause', () => {
-                videoPlayer.pause();
-                log("⏸️ [MEDIA SESSION] Pause command received from OS.");
-            });
-            navigator.mediaSession.setActionHandler('seekto', (details) => {
-                if (details.fastSeek && ('fastSeek' in videoPlayer)) {
-                    videoPlayer.fastSeek(details.seekTime);
-                } else {
-                    videoPlayer.currentTime = details.seekTime;
-                }
-            });
-
-            log("📱 [MEDIA SESSION] OS lock-screen media controls registered.");
-        }
-    }
-
-    // ==========================================
-    // 2. PICTURE-IN-PICTURE (PiP) LOGIC
-    // ==========================================
-    async function togglePictureInPicture() {
+    async function toggleKeepAlivePiP() {
         if (!document.pictureInPictureEnabled) {
-            log("⚠️ [PiP] Picture-in-Picture is not supported on this device/browser.");
+            log("⚠️ [PiP] Picture-in-Picture not supported on this browser.");
             return;
         }
 
         try {
+            if (!keepAliveVideo) {
+                // Generate a silent 1x1 canvas stream
+                const canvas = document.createElement('canvas');
+                canvas.width = 16; canvas.height = 16;
+                const ctx = canvas.getContext('2d');
+                
+                setInterval(() => {
+                    ctx.fillStyle = ctx.fillStyle === '#000000' ? '#2ecc71' : '#000000';
+                    ctx.fillRect(0, 0, 16, 16);
+                }, 1000);
+
+                const stream = canvas.captureStream(1);
+                keepAliveVideo = document.createElement('video');
+                keepAliveVideo.srcObject = stream;
+                keepAliveVideo.muted = true;
+                await keepAliveVideo.play();
+            }
+
             if (document.pictureInPictureElement) {
                 await document.exitPictureInPicture();
-                log("📺 [PiP] Exited Picture-in-Picture mode.");
+                log("⚡ Keep-Alive PiP disabled.");
             } else {
-                await videoPlayer.requestPictureInPicture();
-                log("📺 [PiP] Video popped out into Picture-in-Picture mode!");
+                await keepAliveVideo.requestPictureInPicture();
+                log("⚡ [BACKGROUND ACTIVE] Keep-Alive PiP triggered. JS thread will remain active!");
             }
-        } catch (error) {
-            log(`💥 [PiP Error] ${error.message}`);
+        } catch (err) {
+            log(`💥 [Keep-Alive Error] ${err.message}`);
         }
     }
 
-    // Auto-Popout PiP when tab/app goes background (if video is active)
-    document.addEventListener('visibilitychange', async () => {
-        if (document.hidden) {
-            if (videoPlayer.src && !videoPlayer.paused && document.pictureInPictureEnabled && !document.pictureInPictureElement) {
-                try {
-                    await videoPlayer.requestPictureInPicture();
-                    log("⚡ [AUTO-PiP] App went to background; auto-popped video out to maintain active execution.");
-                } catch (e) {
-                    log(`⚠️ [AUTO-PiP] Failed background pop-out: ${e.message}`);
-                }
-            }
-        }
-    });
-
     // ==========================================
-    // 3. PIPELINE DIAGNOSTICS & PLAYBACK
+    // 2. FILE SYSTEM ACCESS API (HOST VAULT)
     // ==========================================
-    videoPlayer.addEventListener('loadedmetadata', () => {
-        log(`🎯 [PLAYER] Metadata Loaded! Duration: ${videoPlayer.duration.toFixed(2)}s`);
-        setupMediaSession(activeFileName);
-    });
-
-    function assembleAndPlay() {
-        log("---------------------------------------");
-        log("🔍 [DIAGNOSTIC] Beginning Assembly Process...");
-
-        if (rawChunksBuffer.length === 0) {
-            log("❌ [DIAGNOSTIC FAULT] Buffer is empty!");
+    async function selectVaultDirectory() {
+        if (!('showDirectoryPicker' in window)) {
+            alert("Your browser does not support local Directory Access. Please use Chrome/Edge on Desktop/Android.");
             return;
         }
 
-        let actualBytes = 0;
-        for (let chunk of rawChunksBuffer) {
-            actualBytes += chunk.byteLength;
-        }
-
-        log(`📊 Chunks: ${rawChunksBuffer.length}/${expectedTotalChunks} | Total Bytes: ${actualBytes}`);
-
         try {
-            const videoBlob = new Blob(rawChunksBuffer, { type: 'video/mp4' });
-            const objectUrl = URL.createObjectURL(videoBlob);
+            vaultDirectoryHandle = await window.showDirectoryPicker();
+            vaultFileMap.clear();
+            
+            const manifestList = [];
 
-            videoPlayer.pause();
-            videoPlayer.src = objectUrl;
-            videoPlayer.load();
+            // Read all direct video files inside the directory
+            for await (const entry of vaultDirectoryHandle.values()) {
+                if (entry.kind === 'file') {
+                    const file = await entry.getFile();
+                    if (file.type.startsWith('video/') || file.name.endsWith('.mp4') || file.name.endsWith('.mkv')) {
+                        vaultFileMap.set(file.name, entry);
+                        manifestList.push({
+                            name: file.name,
+                            size: (file.size / (1024 * 1024)).toFixed(2) + " MB",
+                            type: file.type
+                        });
+                    }
+                }
+            }
 
-            const playPromise = videoPlayer.play();
-            if (playPromise !== undefined) {
-                playPromise.then(() => {
-                    log("▶️ [SUCCESS] Video actively playing!");
-                }).catch(err => {
-                    log(`⚠️ [AUTOPLAY BLOCKED] Tap play manually on the player.`);
-                });
+            document.getElementById('vault-status').innerText = `Vault Open: ${vaultFileMap.size} videos indexed.`;
+            log(`📂 [HOST VAULT] Indexed ${vaultFileMap.size} files in selected folder.`);
+
+            // Broadcast the folder manifest to the target device
+            const targetId = document.getElementById('target_id').value.toLowerCase().trim();
+            if (targetId) {
+                socket.send(JSON.stringify({
+                    type: "vault_manifest",
+                    from: localDeviceId,
+                    target_id: targetId,
+                    files: manifestList
+                }));
+                log(`📤 Manifest broadcast sent to '${targetId}'.`);
             }
         } catch (err) {
-            log(`💥 [ASSEMBLY CRASH] ${err.message}`);
+            log(`⚠️ [VAULT] Directory selection cancelled or failed: ${err.message}`);
         }
     }
 
+    // Stream a requested file handle over WebSocket (Host side)
+    async function streamFileFromVault(filename, targetId) {
+        const fileHandle = vaultFileMap.get(filename);
+        if (!fileHandle) {
+            log(`❌ [HOST] Requested file '${filename}' not found in local vault map.`);
+            return;
+        }
+
+        const file = await fileHandle.getFile();
+        log(`🚀 [HOST STREAMING] Slicing and sending '${file.name}' (${(file.size / 1024 / 1024).toFixed(2)} MB)...`);
+
+        const CHUNK_SIZE = 2 * 1024 * 1024;
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+        // Send metadata
+        socket.send(JSON.stringify({
+            type: "metadata",
+            from: localDeviceId,
+            target_id: targetId,
+            filename: file.name,
+            file_size: file.size,
+            total_chunks: totalChunks
+        }));
+
+        let currentChunkIndex = 0;
+
+        async function sendNextChunk() {
+            if (currentChunkIndex >= totalChunks) {
+                log(`✅ [HOST] Completed sending all ${totalChunks} binary slices.`);
+                socket.send(JSON.stringify({
+                    type: "stream_complete",
+                    from: localDeviceId,
+                    target_id: targetId
+                }));
+                return;
+            }
+
+            const startByte = currentChunkIndex * CHUNK_SIZE;
+            const endByte = Math.min(startByte + CHUNK_SIZE, file.size);
+            const blobSlice = file.slice(startByte, endByte);
+            const arrayBuffer = await blobSlice.arrayBuffer();
+
+            socket.send(arrayBuffer);
+
+            const percent = Math.round(((currentChunkIndex + 1) / totalChunks) * 100);
+            if (percent % 10 === 0 || currentChunkIndex + 1 === totalChunks) {
+                progressBar.style.width = percent + '%';
+                statusText.innerText = `Host Streaming: ${percent}%`;
+            }
+
+            currentChunkIndex++;
+            setTimeout(sendNextChunk, 30); // Low-latency tick pacing
+        }
+
+        sendNextChunk();
+    }
+
     // ==========================================
-    // 4. WEBSOCKET & SLICING PIPELINE
+    // 3. WEBSOCKET SIGNALING & GUEST RECEIVER
     // ==========================================
     function connectWebSocket() {
         localDeviceId = document.getElementById('device_id').value.trim();
-        if (!localDeviceId) { alert("Please enter a device name."); return; }
+        if (!localDeviceId) { alert("Enter a device name."); return; }
 
-        log(`Connecting to Hub as '${localDeviceId}'...`);
-        
-        // Dynamic protocol selector (supports ws:// and wss:// for tunnels/cloud)
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/${localDeviceId}`);
         socket.binaryType = 'arraybuffer';
 
         socket.onopen = function() {
-            log(`✅ WebSocket Connected as '${localDeviceId}'.`);
+            log(`✅ Connected as '${localDeviceId}'.`);
             registerSection.style.display = 'none';
             shareSection.style.display = 'block';
+            vaultSection.style.display = 'block';
             watchSection.style.display = 'block';
-
-            if (!document.pictureInPictureEnabled) {
-                pipBtn.style.display = 'none'; // Hide button cleanly on unsupported screens like Smart TVs
-            }
         };
 
         socket.onmessage = function(event) {
+            // 1. BINARY CHUNK RECEIVED
             if (event.data instanceof ArrayBuffer) {
                 rawChunksBuffer.push(event.data);
                 
                 if (expectedTotalChunks > 0) {
                     const percent = Math.round((rawChunksBuffer.length / expectedTotalChunks) * 100);
-                    // Throttled UI progress bar updates to save thread cycles
-                    if (percent % 5 === 0 || rawChunksBuffer.length === expectedTotalChunks) {
+                    if (percent % 10 === 0 || rawChunksBuffer.length === expectedTotalChunks) {
                         progressBar.style.width = percent + '%';
                         statusText.innerText = `Receiving Stream: ${percent}%`;
                     }
@@ -236,19 +281,33 @@
                     log("🏁 Final chunk reached!");
                     assembleAndPlay();
                 }
-            } else {
+            } 
+            // 2. TEXT CONTROL PACKET
+            else {
                 try {
                     const packet = JSON.parse(event.data);
-                    
-                    if (packet.type === 'metadata') {
-                        log(`📁 [META] File: '${packet.filename}' (${packet.file_size} bytes).`);
+
+                    // Vault Manifest Packet (Guest side receives folder tree from host)
+                    if (packet.type === 'vault_manifest') {
+                        log(`📁 [GUEST] Received remote folder catalog from '${packet.from}' (${packet.files.length} items).`);
+                        renderVaultFiles(packet.files, packet.from);
+                    }
+                    // Remote File Request Packet (Host side receives request to start sending a file)
+                    else if (packet.type === 'request_file') {
+                        log(`📩 [HOST] Device '${packet.from}' requested file: '${packet.filename}'`);
+                        streamFileFromVault(packet.filename, packet.from);
+                    }
+                    // Stream Metadata Packet
+                    else if (packet.type === 'metadata') {
+                        log(`📁 Stream Starting: '${packet.filename}' (${(packet.file_size / 1024 / 1024).toFixed(2)} MB)`);
                         rawChunksBuffer = [];
                         expectedTotalChunks = packet.total_chunks;
                         expectedFileSize = packet.file_size;
                         activeFileName = packet.filename;
                         progressBar.style.width = '0%';
                         statusText.innerText = "Receiving stream metadata...";
-                    } 
+                    }
+                    // Stream Complete Packet
                     else if (packet.type === 'stream_complete') {
                         log(`🏁 Stream complete signal received.`);
                         progressBar.style.width = '100%';
@@ -256,100 +315,75 @@
                         assembleAndPlay();
                     }
                 } catch (err) {
-                    log(`Hub text: ${event.data}`);
+                    log(`Hub msg: ${event.data}`);
                 }
             }
         };
 
-        socket.onclose = function() {
-            log(`❌ WebSocket Disconnected.`);
-            registerSection.style.display = 'block';
-            shareSection.style.display = 'none';
-            watchSection.style.display = 'none';
-        };
-
-        socket.onerror = function(error) {
-            log(`💥 WebSocket Error: ${error.message}`);
-        };
+        socket.onclose = () => log("❌ Disconnected from WebSocket.");
+        socket.onerror = (err) => log(`💥 Socket Error: ${err.message}`);
     }
 
-    filePicker.addEventListener('change', function(event) {
-        if (event.target.files.length > 0) {
-            fileToBeSent = event.target.files[0];
-            const fileSizeMB = (fileToBeSent.size / (1024 * 1024)).toFixed(2);
-            log(`✅ File selected: '${fileToBeSent.name}' (${fileSizeMB} MB)`);
-            shareBtn.disabled = false;
-        } else {
-            fileToBeSent = null;
-            shareBtn.disabled = true;
+    // Render remote vault items for the guest
+    function renderVaultFiles(files, hostDeviceId) {
+        fileTreeDiv.innerHTML = "";
+        if (files.length === 0) {
+            fileTreeDiv.innerHTML = "No videos found in host folder.";
+            return;
         }
-    });
 
-    function startRealFileStream() {
-        const targetId = document.getElementById('target_id').value.toLowerCase().trim();
-        if (!fileToBeSent || !targetId) { alert("Please target a valid device and file."); return; }
+        files.forEach(f => {
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            item.innerHTML = `
+                <span>🎬 <strong>${f.name}</strong> <small style="color:#aaa;">(${f.size})</small></span>
+                <button class="btn-success" onclick="requestRemoteFile('${f.name}', '${hostDeviceId}')">Play Stream</button>
+            `;
+            fileTreeDiv.appendChild(item);
+        });
+    }
 
-        log(`🚀 Starting transfer of '${fileToBeSent.name}' to '${targetId}'...`);
-        shareBtn.disabled = true;
-
-        const CHUNK_SIZE = 2 * 1024 * 1024;
-        const fileSize = fileToBeSent.size;
-        const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
-
-        const metadataPacket = {
-            type: "metadata",
+    // Send a request to the host to start streaming a specific file
+    function requestRemoteFile(filename, hostDeviceId) {
+        log(`📡 Requesting '${filename}' from host '${hostDeviceId}'...`);
+        socket.send(JSON.stringify({
+            type: "request_file",
             from: localDeviceId,
-            target_id: targetId,
-            filename: fileToBeSent.name,
-            file_size: fileSize,
-            total_chunks: totalChunks
-        };
-        socket.send(JSON.stringify(metadataPacket));
+            target_id: hostDeviceId,
+            filename: filename
+        }));
+    }
 
-        let currentChunkIndex = 0;
+    // ==========================================
+    // 4. ASSEMBLY & PLAYBACK
+    // ==========================================
+    function assembleAndPlay() {
+        if (rawChunksBuffer.length === 0) return;
 
-        function readAndSendChunk() {
-            if (currentChunkIndex >= totalChunks) {
-                log(`✅ Sent all ${totalChunks} binary slices.`);
-                
-                const completePacket = {
-                    type: "stream_complete",
-                    from: localDeviceId,
-                    target_id: targetId
-                };
-                socket.send(JSON.stringify(completePacket));
+        try {
+            const videoBlob = new Blob(rawChunksBuffer, { type: 'video/mp4' });
+            const objectUrl = URL.createObjectURL(videoBlob);
 
-                shareBtn.disabled = false;
-                progressBar.style.width = '100%';
-                statusText.innerText = "Status: Completed.";
-                return;
-            }
+            videoPlayer.pause();
+            videoPlayer.src = objectUrl;
+            videoPlayer.load();
 
-            const startByte = currentChunkIndex * CHUNK_SIZE;
-            const endByte = Math.min(startByte + CHUNK_SIZE, fileSize);
-            const blobSlice = fileToBeSent.slice(startByte, endByte);
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                if (e.target.readyState === FileReader.DONE) {
-                    socket.send(e.target.result);
-                    
-                    const percent = Math.round(((currentChunkIndex + 1) / totalChunks) * 100);
-                    // UI progress update throttling
-                    if (percent % 5 === 0 || currentChunkIndex + 1 === totalChunks) {
-                        progressBar.style.width = percent + '%';
-                        statusText.innerText = `Sending Chunk ${currentChunkIndex + 1}/${totalChunks} (${percent}%)...`;
-                    }
-
-                    currentChunkIndex++;
-                    setTimeout(readAndSendChunk, 50); // Balanced tick delay
-                }
-            };
-
-            reader.readAsArrayBuffer(blobSlice);
+            videoPlayer.play().then(() => {
+                log("▶️ Video playing successfully!");
+            }).catch(() => {
+                log("⚠️ Press manual play on video controls.");
+            });
+        } catch (err) {
+            log(`💥 [ASSEMBLY CRASH] ${err.message}`);
         }
+    }
 
-        readAndSendChunk();
+    async function togglePictureInPicture() {
+        if (document.pictureInPictureElement) {
+            await document.exitPictureInPicture();
+        } else if (videoPlayer.src) {
+            await videoPlayer.requestPictureInPicture();
+        }
     }
 </script>
 
