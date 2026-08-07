@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>ReShare - Media Debug Engine</title>
+    <title>ReShare - Zero-Install Media Bridge</title>
     <style>
         body { font-family: sans-serif; background-color: #1a1a1a; color: #eee; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
         .container { text-align: center; background: #2a2a2a; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); width: 80%; max-width: 600px;}
         #register-section, #share-section, #watch-section { margin-bottom: 25px; border-bottom: 1px solid #444; padding-bottom: 20px; }
         input[type="text"] { padding: 12px; border-radius: 8px; border: 1px solid #444; background: #333; color: white; width: 60%; font-size: 16px;}
-        button { padding: 12px 24px; border-radius: 8px; border: none; background: #ff4757; color: white; font-weight: bold; cursor: pointer; font-size: 16px; transition: background 0.2s;}
+        button { padding: 12px 24px; border-radius: 8px; border: none; background: #ff4757; color: white; font-weight: bold; cursor: pointer; font-size: 16px; transition: background 0.2s; margin: 5px;}
         button:hover { background: #ff6b81; }
         button:disabled { background: #555; cursor: not-allowed; }
-        #log { background: #111; color: #0f0; font-family: monospace; padding: 15px; border-radius: 8px; height: 180px; overflow-y: scroll; text-align: left; font-size: 12px; margin-top: 10px;}
+        #log { background: #111; color: #0f0; font-family: monospace; padding: 15px; border-radius: 8px; height: 150px; overflow-y: scroll; text-align: left; font-size: 12px; margin-top: 10px;}
         video { width: 100%; max-width: 500px; border-radius: 8px; border: 2px solid #555; background: black;}
         #status-bar { height: 20px; background: #333; border-radius: 4px; margin-top: 10px; position: relative; overflow: hidden; }
         #status-progress { height: 100%; background: #2ecc71; width: 0%; transition: width 0.1s linear; }
@@ -20,7 +20,7 @@
 <body>
 
 <div class="container">
-    <h2>ReShare Dev Hub (Diagnostic Mode)</h2>
+    <h2>ReShare Dev Hub</h2>
 
     <div id="register-section">
         <p>Step 1: Enter your unique Device ID</p>
@@ -46,6 +46,8 @@
         <video id="video-player" controls preload="metadata">
             Your browser does not support the video tag.
         </video>
+        <br/>
+        <button id="pip-btn" onclick="togglePictureInPicture()" style="margin-top: 10px;">📺 Pop Out Video (PiP)</button>
         <p style="font-size: 12px; color: #aaa;">Waiting for movie stream...</p>
     </div>
 
@@ -60,6 +62,7 @@
     let rawChunksBuffer = [];
     let expectedTotalChunks = 0;
     let expectedFileSize = 0;
+    let activeFileName = "Video Stream";
 
     const logDiv = document.getElementById('log');
     const shareSection = document.getElementById('share-section');
@@ -70,6 +73,7 @@
     const progressBar = document.getElementById('status-progress');
     const statusText = document.getElementById('transfer-status');
     const videoPlayer = document.getElementById('video-player');
+    const pipBtn = document.getElementById('pip-btn');
 
     function log(message) {
         logDiv.innerHTML += `> ${message}<br>`;
@@ -77,27 +81,80 @@
         console.log(message);
     }
 
-    // Attach deep diagnostic events directly to the HTML5 video player
-    videoPlayer.addEventListener('error', (e) => {
-        const err = videoPlayer.error;
-        let details = "Unknown";
-        if (err) {
-            switch(err.code) {
-                case 1: details = "MEDIA_ERR_ABORTED (Fetching aborted)"; break;
-                case 2: details = "MEDIA_ERR_NETWORK (Network fail)"; break;
-                case 3: details = "MEDIA_ERR_DECODE (Corrupt file or unsupported codec)"; break;
-                case 4: details = "MEDIA_ERR_SRC_NOT_SUPPORTED (Format/MIME not supported)"; break;
+    // ==========================================
+    // 1. MEDIA SESSION & BACKGROUND KEEP-ALIVE
+    // ==========================================
+    function setupMediaSession(filename) {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: filename || "ReShare Movie Stream",
+                artist: "ReShare Zero-Install NAS",
+                album: "Live Streaming Bridge"
+            });
+
+            // Bind System Lock-Screen Controls directly to the video tag
+            navigator.mediaSession.setActionHandler('play', () => {
+                videoPlayer.play();
+                log("▶️ [MEDIA SESSION] Play command received from OS.");
+            });
+            navigator.mediaSession.setActionHandler('pause', () => {
+                videoPlayer.pause();
+                log("⏸️ [MEDIA SESSION] Pause command received from OS.");
+            });
+            navigator.mediaSession.setActionHandler('seekto', (details) => {
+                if (details.fastSeek && ('fastSeek' in videoPlayer)) {
+                    videoPlayer.fastSeek(details.seekTime);
+                } else {
+                    videoPlayer.currentTime = details.seekTime;
+                }
+            });
+
+            log("📱 [MEDIA SESSION] OS lock-screen media controls registered.");
+        }
+    }
+
+    // ==========================================
+    // 2. PICTURE-IN-PICTURE (PiP) LOGIC
+    // ==========================================
+    async function togglePictureInPicture() {
+        if (!document.pictureInPictureEnabled) {
+            log("⚠️ [PiP] Picture-in-Picture is not supported on this device/browser.");
+            return;
+        }
+
+        try {
+            if (document.pictureInPictureElement) {
+                await document.exitPictureInPicture();
+                log("📺 [PiP] Exited Picture-in-Picture mode.");
+            } else {
+                await videoPlayer.requestPictureInPicture();
+                log("📺 [PiP] Video popped out into Picture-in-Picture mode!");
+            }
+        } catch (error) {
+            log(`💥 [PiP Error] ${error.message}`);
+        }
+    }
+
+    // Auto-Popout PiP when tab/app goes background (if video is active)
+    document.addEventListener('visibilitychange', async () => {
+        if (document.hidden) {
+            if (videoPlayer.src && !videoPlayer.paused && document.pictureInPictureEnabled && !document.pictureInPictureElement) {
+                try {
+                    await videoPlayer.requestPictureInPicture();
+                    log("⚡ [AUTO-PiP] App went to background; auto-popped video out to maintain active execution.");
+                } catch (e) {
+                    log(`⚠️ [AUTO-PiP] Failed background pop-out: ${e.message}`);
+                }
             }
         }
-        log(`💥 [VIDEO ERROR ${err ? err.code : '?'}] ${details}`);
     });
 
+    // ==========================================
+    // 3. PIPELINE DIAGNOSTICS & PLAYBACK
+    // ==========================================
     videoPlayer.addEventListener('loadedmetadata', () => {
-        log(`🎯 [PLAYER] Metadata Loaded! Duration: ${videoPlayer.duration.toFixed(2)}s, Dimensions: ${videoPlayer.videoWidth}x${videoPlayer.videoHeight}`);
-    });
-
-    videoPlayer.addEventListener('canplay', () => {
-        log(`✅ [PLAYER] Video ready for playback!`);
+        log(`🎯 [PLAYER] Metadata Loaded! Duration: ${videoPlayer.duration.toFixed(2)}s`);
+        setupMediaSession(activeFileName);
     });
 
     function assembleAndPlay() {
@@ -105,63 +162,50 @@
         log("🔍 [DIAGNOSTIC] Beginning Assembly Process...");
 
         if (rawChunksBuffer.length === 0) {
-            log("❌ [DIAGNOSTIC FAULT] Buffer is completely empty!");
+            log("❌ [DIAGNOSTIC FAULT] Buffer is empty!");
             return;
         }
 
-        // Calculate total buffer bytes
         let actualBytes = 0;
         for (let chunk of rawChunksBuffer) {
             actualBytes += chunk.byteLength;
         }
 
-        log(`📊 Chunks Collected: ${rawChunksBuffer.length} / ${expectedTotalChunks}`);
-        log(`📊 Total Bytes in Memory: ${actualBytes} bytes (Expected: ${expectedFileSize} bytes)`);
+        log(`📊 Chunks: ${rawChunksBuffer.length}/${expectedTotalChunks} | Total Bytes: ${actualBytes}`);
 
-        if (expectedFileSize > 0 && actualBytes !== expectedFileSize) {
-            log(`⚠️ [WARNING] Size Mismatch! Missing ${expectedFileSize - actualBytes} bytes.`);
-        }
-
-        // Create Blob
         try {
             const videoBlob = new Blob(rawChunksBuffer, { type: 'video/mp4' });
-            log(`📦 Blob Created successfully! Type: '${videoBlob.type}', Size: ${videoBlob.size} bytes`);
-
             const objectUrl = URL.createObjectURL(videoBlob);
-            log(`🔗 Generated Blob URL: ${objectUrl}`);
 
-            // Test if browser claims it can play this format
-            const canPlay = videoPlayer.canPlayType('video/mp4');
-            log(`❓ Browser 'video/mp4' support rating: '${canPlay}'`);
-
-            // Load into player cleanly
             videoPlayer.pause();
             videoPlayer.src = objectUrl;
             videoPlayer.load();
 
-            log("⏳ Triggered videoPlayer.load(). Awaiting loadedmetadata event...");
-
-            // Play attempt
             const playPromise = videoPlayer.play();
             if (playPromise !== undefined) {
                 playPromise.then(() => {
                     log("▶️ [SUCCESS] Video actively playing!");
                 }).catch(err => {
-                    log(`⚠️ [AUTOPLAY BLOCKED] ${err.name}: ${err.message}`);
-                    log("👉 Action: Click the manual Play button on the video player interface.");
+                    log(`⚠️ [AUTOPLAY BLOCKED] Tap play manually on the player.`);
                 });
             }
         } catch (err) {
-            log(`💥 [ASSEMBLY CRASH] ${err.stack || err.message}`);
+            log(`💥 [ASSEMBLY CRASH] ${err.message}`);
         }
     }
 
+    // ==========================================
+    // 4. WEBSOCKET & SLICING PIPELINE
+    // ==========================================
     function connectWebSocket() {
         localDeviceId = document.getElementById('device_id').value.trim();
         if (!localDeviceId) { alert("Please enter a device name."); return; }
 
         log(`Connecting to Hub as '${localDeviceId}'...`);
-        socket = new WebSocket(`ws://${window.location.host}/ws/${localDeviceId}`);
+        
+        // Dynamic protocol selector (supports ws:// and wss:// for tunnels/cloud)
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        socket = new WebSocket(`${wsProtocol}//${window.location.host}/ws/${localDeviceId}`);
         socket.binaryType = 'arraybuffer';
 
         socket.onopen = function() {
@@ -169,41 +213,44 @@
             registerSection.style.display = 'none';
             shareSection.style.display = 'block';
             watchSection.style.display = 'block';
+
+            if (!document.pictureInPictureEnabled) {
+                pipBtn.style.display = 'none'; // Hide button cleanly on unsupported screens like Smart TVs
+            }
         };
 
         socket.onmessage = function(event) {
-            // 1. RAW BINARY CHUNK
             if (event.data instanceof ArrayBuffer) {
                 rawChunksBuffer.push(event.data);
-                log(`📦 [DATA] Received chunk ${rawChunksBuffer.length}/${expectedTotalChunks || '?'}`);
                 
                 if (expectedTotalChunks > 0) {
                     const percent = Math.round((rawChunksBuffer.length / expectedTotalChunks) * 100);
-                    progressBar.style.width = percent + '%';
-                    statusText.innerText = `Receiving Stream: ${percent}%`;
+                    // Throttled UI progress bar updates to save thread cycles
+                    if (percent % 5 === 0 || rawChunksBuffer.length === expectedTotalChunks) {
+                        progressBar.style.width = percent + '%';
+                        statusText.innerText = `Receiving Stream: ${percent}%`;
+                    }
                 }
 
-                // Fallback: If 100% of chunks arrive, auto-assemble even if stream_complete packet dropped
                 if (expectedTotalChunks > 0 && rawChunksBuffer.length === expectedTotalChunks) {
-                    log("🏁 Final chunk reached via count threshold!");
+                    log("🏁 Final chunk reached!");
                     assembleAndPlay();
                 }
-            } 
-            // 2. CONTROL SIGNAL
-            else {
+            } else {
                 try {
                     const packet = JSON.parse(event.data);
                     
                     if (packet.type === 'metadata') {
-                        log(`📁 [META] File: '${packet.filename}' (${packet.file_size} bytes, ${packet.total_chunks} chunks).`);
+                        log(`📁 [META] File: '${packet.filename}' (${packet.file_size} bytes).`);
                         rawChunksBuffer = [];
                         expectedTotalChunks = packet.total_chunks;
                         expectedFileSize = packet.file_size;
+                        activeFileName = packet.filename;
                         progressBar.style.width = '0%';
                         statusText.innerText = "Receiving stream metadata...";
                     } 
                     else if (packet.type === 'stream_complete') {
-                        log(`🏁 Stream complete signal received from sender.`);
+                        log(`🏁 Stream complete signal received.`);
                         progressBar.style.width = '100%';
                         statusText.innerText = "Status: Transfer Finished.";
                         assembleAndPlay();
@@ -288,11 +335,14 @@
                     socket.send(e.target.result);
                     
                     const percent = Math.round(((currentChunkIndex + 1) / totalChunks) * 100);
-                    progressBar.style.width = percent + '%';
-                    statusText.innerText = `Status: Sending Chunk ${currentChunkIndex + 1}/${totalChunks}...`;
+                    // UI progress update throttling
+                    if (percent % 5 === 0 || currentChunkIndex + 1 === totalChunks) {
+                        progressBar.style.width = percent + '%';
+                        statusText.innerText = `Sending Chunk ${currentChunkIndex + 1}/${totalChunks} (${percent}%)...`;
+                    }
 
                     currentChunkIndex++;
-                    setTimeout(readAndSendChunk, 100);
+                    setTimeout(readAndSendChunk, 50); // Balanced tick delay
                 }
             };
 
